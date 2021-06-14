@@ -125,4 +125,8 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
         """
         app_label = instance._meta.app_label
         model_name = instance._meta.model_name
-        transaction.on_commit(lambda: handle_save.delay(instance.pk, app_label, model_name))
+        if model_name in ["business", "review"]:
+            transaction.on_commit(lambda: handle_save.delay(instance.pk, app_label, model_name))
+        else:
+            registry.update(instance)
+            registry.update_related(instance)
