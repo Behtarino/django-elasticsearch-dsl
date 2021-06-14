@@ -6,7 +6,9 @@ cause things to index.
 
 from __future__ import absolute_import
 
-from django.db import models
+from celery import shared_task
+from django.apps import apps
+from django.db import models, transaction
 
 from .registries import registry
 
@@ -100,3 +102,27 @@ class RealTimeSignalProcessor(BaseSignalProcessor):
         models.signals.post_delete.disconnect(self.handle_delete)
         models.signals.m2m_changed.disconnect(self.handle_m2m_changed)
         models.signals.pre_delete.disconnect(self.handle_pre_delete)
+
+
+@shared_task
+def handle_save(pk, app_label, model_name):
+    sender = apps.get_model(app_label, model_name)
+    instance = sender.objects.get(pk=pk)
+    registry.update(instance)
+    registry.update_related(instance)
+
+
+class CelerySignalProcessor(RealTimeSignalProcessor):
+    """Celery signal processor.
+    Allows automatic updates on the index as delayed background tasks using
+    Celery.
+    """
+
+    def handle_save(self, sender, instance, **kwargs):
+        """Handle save.
+        Given an individual model instance, update the object in the index.
+        Update the related objects either.
+        """
+        app_label = instance._meta.app_label
+        model_name = instance._meta.model_name
+        transaction.on_commit(lambda: handle_save.delay(instance.pk, app_label, model_name))
